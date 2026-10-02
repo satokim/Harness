@@ -1,6 +1,12 @@
 import Foundation
 import WebKit
 
+#if os(macOS)
+typealias PlatformImage = NSImage
+#else
+typealias PlatformImage = UIImage
+#endif
+
 struct BlockedEvent: Identifiable, Hashable {
     enum Kind: String {
         case popup
@@ -9,9 +15,9 @@ struct BlockedEvent: Identifiable, Hashable {
 
         var label: String {
             switch self {
-            case .popup: "팝업"
-            case .externalApp: "외부 앱 호출"
-            case .crossSite: "다른 사이트로 이동"
+            case .popup: String(localized: "팝업")
+            case .externalApp: String(localized: "외부 앱 호출")
+            case .crossSite: String(localized: "다른 사이트로 이동")
             }
         }
     }
@@ -49,13 +55,15 @@ final class BrowserTab: NSObject, Identifiable {
     private(set) var siteRule: SiteRule?
     private(set) var blockedEvents: [BlockedEvent] = []
     var bannerEvent: BlockedEvent?
+    /// 탭 목록 카드에 쓰는 축소 화면.
+    private(set) var snapshot: PlatformImage?
 
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
     var displayTitle: String {
         if !title.isEmpty { return title }
         if !restoredTitle.isEmpty { return restoredTitle }
-        return (currentURL ?? requestedURL)?.host() ?? "새 탭"
+        return (currentURL ?? requestedURL)?.host() ?? String(localized: "새 탭")
     }
 
     var allowedDomains: [String] { siteRule?.allowedDestinations ?? [] }
@@ -105,6 +113,16 @@ final class BrowserTab: NSObject, Identifiable {
         }
         bannerEvent = nil
         webView.load(URLRequest(url: event.url))
+    }
+
+    /// 화면에 붙어 있을 때만 찍을 수 있다. 실패하면 이전 스냅샷을 그대로 둔다.
+    func captureSnapshot() async {
+        guard currentURL != nil, webView.window != nil else { return }
+        let configuration = WKSnapshotConfiguration()
+        configuration.snapshotWidth = 360
+        if let image = try? await webView.takeSnapshot(configuration: configuration) {
+            snapshot = image
+        }
     }
 
     func clearBlockedEvents() {
@@ -206,6 +224,10 @@ extension BrowserTab: WKNavigationDelegate {
             store?.recordVisit(url: url, title: title)
         }
         store?.persistTabs()
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            await captureSnapshot()
+        }
     }
 
     private func policy(for action: WKNavigationAction) -> WKNavigationActionPolicy {

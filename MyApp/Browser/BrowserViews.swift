@@ -22,6 +22,7 @@ struct WebViewContainer: UIViewRepresentable {
 
 struct TabStripView: View {
     let store: BrowserStore
+    let onShowOverview: () -> Void
     let onShowLibrary: () -> Void
 
     var body: some View {
@@ -39,6 +40,10 @@ struct TabStripView: View {
                 }
                 .padding(.horizontal)
             }
+            Button(action: onShowOverview) {
+                Image(systemName: "square.on.square")
+            }
+            .buttonStyle(.borderless)
             Button(action: onShowLibrary) {
                 Image(systemName: "books.vertical")
             }

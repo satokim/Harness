@@ -27,10 +27,20 @@ struct ContentView: View {
 private struct BrowserRootView: View {
     let store: BrowserStore
     @State private var showsLibrary = false
+    @State private var showsOverview = false
 
     var body: some View {
         VStack(spacing: 0) {
-            TabStripView(store: store) { showsLibrary = true }
+            TabStripView(
+                store: store,
+                onShowOverview: {
+                    Task {
+                        await store.selectedTab?.captureSnapshot()
+                        showsOverview = true
+                    }
+                },
+                onShowLibrary: { showsLibrary = true }
+            )
             if let tab = store.selectedTab {
                 BrowserPane(tab: tab, store: store)
                     .id(tab.id)
@@ -39,6 +49,15 @@ private struct BrowserRootView: View {
         .sheet(isPresented: $showsLibrary) {
             LibraryView(store: store)
         }
+        #if os(macOS)
+        .sheet(isPresented: $showsOverview) {
+            TabOverviewView(store: store)
+        }
+        #else
+        .fullScreenCover(isPresented: $showsOverview) {
+            TabOverviewView(store: store)
+        }
+        #endif
     }
 }
 

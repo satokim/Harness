@@ -4,12 +4,18 @@ import SwiftUI
 /// 북마크 · 방문 기록 · 차단 통계 · 사이트 규칙.
 struct LibraryView: View {
     private enum Section: String, CaseIterable, Identifiable {
-        case bookmarks = "북마크"
-        case history = "기록"
-        case blocked = "차단"
-        case sites = "사이트"
+        case bookmarks, history, blocked, sites
 
         var id: Self { self }
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .bookmarks: "북마크"
+            case .history: "기록"
+            case .blocked: "차단"
+            case .sites: "사이트"
+            }
+        }
     }
 
     let store: BrowserStore
@@ -21,7 +27,7 @@ struct LibraryView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 Picker("보관함", selection: $section) {
-                    ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(Section.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -225,8 +231,8 @@ private struct SiteRuleList: View {
         List {
             ForEach(rules) { rule in
                 Section(rule.domain) {
-                    LabeledContent("JavaScript", value: label(rule.javaScriptEnabled, on: "허용", off: "차단"))
-                    LabeledContent("외부 스크립트", value: label(rule.blockThirdPartyScripts, on: "차단", off: "허용"))
+                    LabeledContent("JavaScript", value: label(rule.javaScriptEnabled, on: String(localized: "허용"), off: String(localized: "차단")))
+                    LabeledContent("외부 스크립트", value: label(rule.blockThirdPartyScripts, on: String(localized: "차단"), off: String(localized: "허용")))
                     ForEach(rule.allowedDestinations, id: \.self) { destination in
                         HStack {
                             Text("이동 허용 · \(destination)")
@@ -257,7 +263,7 @@ private struct SiteRuleList: View {
     }
 
     private func label(_ value: Bool?, on: String, off: String) -> String {
-        guard let value else { return "전체 설정 따름" }
+        guard let value else { return String(localized: "전체 설정 따름") }
         return value ? on : off
     }
 }
