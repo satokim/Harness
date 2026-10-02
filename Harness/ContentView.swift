@@ -31,21 +31,25 @@ private struct BrowserRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TabStripView(
-                store: store,
-                onShowOverview: {
-                    Task {
-                        await store.selectedTab?.captureSnapshot()
-                        showsOverview = true
-                    }
-                },
-                onShowLibrary: { showsLibrary = true }
-            )
+            if store.selectedTab?.isChromeHidden != true {
+                TabStripView(
+                    store: store,
+                    onShowOverview: {
+                        Task {
+                            await store.selectedTab?.captureSnapshot()
+                            showsOverview = true
+                        }
+                    },
+                    onShowLibrary: { showsLibrary = true }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
             if let tab = store.selectedTab {
                 BrowserPane(tab: tab, store: store)
                     .id(tab.id)
             }
         }
+        .animation(.snappy(duration: 0.25), value: store.selectedTab?.isChromeHidden)
         .sheet(isPresented: $showsLibrary) {
             LibraryView(store: store)
         }

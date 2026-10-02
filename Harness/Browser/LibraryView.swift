@@ -34,7 +34,7 @@ struct LibraryView: View {
                 .padding()
 
                 switch section {
-                case .bookmarks: BookmarkList(search: searchText, open: open)
+                case .bookmarks: BookmarkList(store: store, search: searchText, open: open)
                 case .history: HistoryList(search: searchText, open: open)
                 case .blocked: BlockedStatsList()
                 case .sites: SiteRuleList(store: store)
@@ -63,11 +63,12 @@ struct LibraryView: View {
     }
 }
 
-private struct LinkRow: View {
+private struct LinkRow<ExtraMenu: View>: View {
     let title: String
     let urlString: String
     let date: Date?
     let open: (URL, Bool) -> Void
+    @ViewBuilder var extraMenu: ExtraMenu
 
     var body: some View {
         Button {
@@ -92,33 +93,151 @@ private struct LinkRow: View {
             Button("새 탭에서 열기") {
                 if let url = URL(string: urlString) { open(url, true) }
             }
+            extraMenu
         }
     }
 }
 
+extension LinkRow where ExtraMenu == EmptyView {
+    init(title: String, urlString: String, date: Date?, open: @escaping (URL, Bool) -> Void) {
+        self.init(title: title, urlString: urlString, date: date, open: open) { EmptyView() }
+    }
+}
+
 private struct BookmarkList: View {
-    @Environment(\.modelContext) private var context
-    @Query(sort: \Bookmark.createdAt, order: .reverse) private var bookmarks: [Bookmark]
+    let store: BrowserStore
     let search: String
     let open: (URL, Bool) -> Void
 
+    @Query(sort: \BookmarkFolder.name) private var folders: [BookmarkFolder]
+    @Query(sort: \Bookmark.createdAt, order: .reverse) private var bookmarks: [Bookmark]
+    @State private var isCreatingFolder = false
+    @State private var renamingFolder: BookmarkFolder?
+    @State private var folderName = ""
+
     var body: some View {
-        let items = bookmarks.filter {
-            search.isEmpty || $0.title.localizedStandardContains(search) || $0.urlString.localizedStandardContains(search)
-        }
         List {
-            ForEach(items) { bookmark in
-                LinkRow(title: bookmark.title, urlString: bookmark.urlString, date: nil, open: open)
-            }
-            .onDelete { offsets in
-                for index in offsets { context.delete(items[index]) }
+            if search.isEmpty {
+                Section {
+                    ForEach(folders) { folder in
+                        NavigationLink {
+                            FolderBookmarkList(store: store, folder: folder, open: open)
+                        } label: {
+                            Label(folder.name, systemImage: "folder")
+                                .badge(folder.bookmarks.count)
+                        }
+                        .contextMenu {
+                            Button("이름 변경") {
+                                folderName = folder.name
+                                renamingFolder = folder
+                            }
+                            Button("그룹 삭제", role: .destructive) { store.delete(folder) }
+                        }
+                    }
+                    .onDelete { offsets in
+                        for index in offsets { store.delete(folders[index]) }
+                    }
+                    Button {
+                        folderName = ""
+                        isCreatingFolder = true
+                    } label: {
+                        Label("새 그룹", systemImage: "folder.badge.plus")
+                    }
+                } header: {
+                    Text("그룹")
+                } footer: {
+                    if !folders.isEmpty { Text("그룹을 삭제해도 안의 북마크는 '그룹 없음' 으로 옮겨집니다.") }
+                }
+
+                Section("그룹 없음") {
+                    BookmarkRows(store: store, bookmarks: bookmarks.filter { $0.folder == nil }, open: open)
+                }
+            } else {
+                BookmarkRows(store: store, bookmarks: bookmarks.filter(matches), open: open)
             }
         }
         .overlay {
-            if items.isEmpty {
+            if bookmarks.isEmpty && folders.isEmpty {
                 ContentUnavailableView("북마크 없음", systemImage: "star", description: Text("주소창의 별 버튼으로 추가합니다."))
             }
         }
+        .alert("새 그룹", isPresented: $isCreatingFolder) {
+            TextField("그룹 이름", text: $folderName)
+            Button("취소", role: .cancel) {}
+            Button("추가") {
+                let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty { _ = store.createFolder(named: name) }
+            }
+        }
+        .alert("이름 변경", isPresented: Binding(
+            get: { renamingFolder != nil },
+            set: { if !$0 { renamingFolder = nil } }
+        )) {
+            TextField("그룹 이름", text: $folderName)
+            Button("취소", role: .cancel) {}
+            Button("저장") {
+                let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty {
+                    renamingFolder?.name = name
+                    store.save()
+                }
+            }
+        }
+    }
+
+    private func matches(_ bookmark: Bookmark) -> Bool {
+        bookmark.title.localizedStandardContains(search) || bookmark.urlString.localizedStandardContains(search)
+    }
+}
+
+private struct FolderBookmarkList: View {
+    let store: BrowserStore
+    let folder: BookmarkFolder
+    let open: (URL, Bool) -> Void
+
+    var body: some View {
+        let bookmarks = folder.bookmarks.sorted { $0.createdAt > $1.createdAt }
+        List {
+            BookmarkRows(store: store, bookmarks: bookmarks, open: open)
+        }
+        .navigationTitle(folder.name)
+        .overlay {
+            if bookmarks.isEmpty {
+                ContentUnavailableView("빈 그룹", systemImage: "folder", description: Text("북마크를 길게 눌러 이 그룹으로 옮길 수 있습니다."))
+            }
+        }
+    }
+}
+
+/// 길게 누르면 다른 그룹으로 옮길 수 있는 북마크 행.
+private struct BookmarkRows: View {
+    let store: BrowserStore
+    let bookmarks: [Bookmark]
+    let open: (URL, Bool) -> Void
+    @Query(sort: \BookmarkFolder.name) private var folders: [BookmarkFolder]
+
+    var body: some View {
+        ForEach(bookmarks) { bookmark in
+            LinkRow(title: bookmark.title, urlString: bookmark.urlString, date: nil, open: open) {
+                Menu("그룹 이동") {
+                    Button("그룹 없음") { move(bookmark, to: nil) }
+                        .disabled(bookmark.folder == nil)
+                    ForEach(folders) { folder in
+                        Button(folder.name) { move(bookmark, to: folder) }
+                            .disabled(bookmark.folder == folder)
+                    }
+                }
+                Button("삭제", role: .destructive) { store.delete(bookmark) }
+            }
+        }
+        .onDelete { offsets in
+            for index in offsets { store.delete(bookmarks[index]) }
+        }
+    }
+
+    private func move(_ bookmark: Bookmark, to folder: BookmarkFolder?) {
+        bookmark.folder = folder
+        store.save()
     }
 }
 

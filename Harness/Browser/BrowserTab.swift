@@ -57,6 +57,12 @@ final class BrowserTab: NSObject, Identifiable {
     var bannerEvent: BlockedEvent?
     /// 탭 목록 카드에 쓰는 축소 화면.
     private(set) var snapshot: PlatformImage?
+    /// 아래로 스크롤하는 동안 탭 줄 · 주소창을 접어 본문을 넓게 보여준다.
+    private(set) var isChromeHidden = false
+    #if !os(macOS)
+    @ObservationIgnored private var lastScrollY: CGFloat = 0
+    @ObservationIgnored private var scrollTravel: CGFloat = 0
+    #endif
 
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
@@ -85,12 +91,18 @@ final class BrowserTab: NSObject, Identifiable {
             watch(\.title), watch(\.url), watch(\.canGoBack), watch(\.canGoForward),
             watch(\.isLoading), watch(\.estimatedProgress),
         ]
+        #if !os(macOS)
+        observations.append(webView.scrollView.observe(\.contentOffset, options: []) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.trackScroll() }
+        })
+        #endif
     }
 
     func load(_ url: URL) {
         requestedURL = url
         lock(to: url.host().map(Self.baseDomain))
         bannerEvent = nil
+        setChromeHidden(false)
         webView.load(URLRequest(url: url))
     }
 
@@ -167,6 +179,40 @@ final class BrowserTab: NSObject, Identifiable {
         siteRule = rule
     }
 
+    private func setChromeHidden(_ hidden: Bool) {
+        if isChromeHidden != hidden { isChromeHidden = hidden }
+    }
+
+    #if !os(macOS)
+    /// 일정 거리 이상 같은 방향으로 끌었을 때만 접고 편다. 조금씩 흔들릴 때 깜빡이지 않게 하기 위해서다.
+    private func trackScroll() {
+        let scrollView = webView.scrollView
+        let y = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+        let maxY = scrollView.contentSize.height + scrollView.adjustedContentInset.top
+            + scrollView.adjustedContentInset.bottom - scrollView.bounds.height
+        defer { lastScrollY = y }
+
+        // 맨 위 근처에서는 항상 보여준다
+        if y <= 0 {
+            scrollTravel = 0
+            setChromeHidden(false)
+            return
+        }
+        // 손으로 굴린 스크롤만 본다. 아래쪽 바운스 · 레이아웃 변경으로 생긴 움직임은 무시한다
+        guard scrollView.isDragging || scrollView.isDecelerating, y <= maxY else { return }
+
+        let delta = y - lastScrollY
+        if delta == 0 { return }
+        if (delta > 0) != (scrollTravel > 0) { scrollTravel = 0 }
+        scrollTravel += delta
+        if scrollTravel > 24 {
+            setChromeHidden(true)
+        } else if scrollTravel < -24 {
+            setChromeHidden(false)
+        }
+    }
+    #endif
+
     private func watch<Value>(_ keyPath: KeyPath<WKWebView, Value>) -> NSKeyValueObservation {
         webView.observe(keyPath, options: []) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.syncState() }
@@ -216,6 +262,11 @@ extension BrowserTab: WKNavigationDelegate {
         let policy = policy(for: navigationAction)
         preferences.allowsContentJavaScript = javaScriptEnabled
         return (policy, preferences)
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        // 새 페이지로 넘어가면 주소를 확인할 수 있게 다시 보여준다
+        setChromeHidden(false)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

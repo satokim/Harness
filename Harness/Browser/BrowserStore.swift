@@ -200,14 +200,38 @@ final class BrowserStore {
         save()
     }
 
-    func toggleBookmark(url: URL, title: String) {
+    func bookmark(for url: URL) -> Bookmark? {
         let urlString = url.absoluteString
         let descriptor = FetchDescriptor<Bookmark>(predicate: #Predicate { $0.urlString == urlString })
-        if let bookmark = try? context.fetch(descriptor).first {
-            context.delete(bookmark)
-        } else {
-            context.insert(Bookmark(urlString: urlString, title: title))
-        }
+        return try? context.fetch(descriptor).first
+    }
+
+    /// 이미 있는 주소면 제목과 그룹만 바꾼다.
+    func saveBookmark(url: URL, title: String, folder: BookmarkFolder?) {
+        let bookmark = bookmark(for: url) ?? {
+            let bookmark = Bookmark(urlString: url.absoluteString, title: title)
+            context.insert(bookmark)
+            return bookmark
+        }()
+        bookmark.title = title
+        bookmark.folder = folder
+        save()
+    }
+
+    func delete(_ bookmark: Bookmark) {
+        context.delete(bookmark)
+        save()
+    }
+
+    func createFolder(named name: String) -> BookmarkFolder {
+        let folder = BookmarkFolder(name: name)
+        context.insert(folder)
+        save()
+        return folder
+    }
+
+    func delete(_ folder: BookmarkFolder) {
+        context.delete(folder)
         save()
     }
 

@@ -41,10 +41,24 @@ final class Bookmark {
     @Attribute(.unique) var urlString: String
     var title: String
     var createdAt = Date.now
+    /// nil 이면 그룹 없음.
+    var folder: BookmarkFolder?
 
     init(urlString: String, title: String) {
         self.urlString = urlString
         self.title = title
+    }
+}
+
+/// 북마크 그룹. 그룹을 지워도 안의 북마크는 '그룹 없음' 으로 남는다.
+@Model
+final class BookmarkFolder {
+    var name: String
+    var createdAt = Date.now
+    @Relationship(deleteRule: .nullify, inverse: \Bookmark.folder) var bookmarks: [Bookmark] = []
+
+    init(name: String) {
+        self.name = name
     }
 }
 
@@ -80,6 +94,6 @@ final class BlockedRecord {
 
 extension BrowserStore {
     static let modelTypes: [any PersistentModel.Type] = [
-        SiteRule.self, SavedTab.self, Bookmark.self, HistoryEntry.self, BlockedRecord.self,
+        SiteRule.self, SavedTab.self, Bookmark.self, BookmarkFolder.self, HistoryEntry.self, BlockedRecord.self,
     ]
 }

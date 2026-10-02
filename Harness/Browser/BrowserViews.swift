@@ -92,7 +92,10 @@ struct BrowserPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AddressBarView(tab: tab, store: store)
+            if !tab.isChromeHidden {
+                AddressBarView(tab: tab, store: store)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             ProgressView(value: tab.progress)
                 .progressViewStyle(.linear)
                 .opacity(tab.isLoading ? 1 : 0)
@@ -108,6 +111,7 @@ struct BrowserPane: View {
             }
             .animation(.default, value: tab.bannerEvent)
         }
+        .animation(.snappy(duration: 0.25), value: tab.isChromeHidden)
         .onAppear { tab.loadIfNeeded() }
     }
 }
@@ -117,6 +121,7 @@ private struct AddressBarView: View {
     let store: BrowserStore
     @State private var text = ""
     @State private var showsShield = false
+    @State private var showsBookmarkEditor = false
     @FocusState private var isEditing: Bool
     @Query private var bookmarks: [Bookmark]
 
@@ -153,12 +158,15 @@ private struct AddressBarView: View {
                     .disabled(tab.currentURL == nil)
             }
 
-            Button {
-                if let url = tab.currentURL { store.toggleBookmark(url: url, title: tab.displayTitle) }
-            } label: {
+            Button { showsBookmarkEditor = true } label: {
                 Image(systemName: isBookmarked ? "star.fill" : "star")
             }
             .disabled(tab.currentURL == nil)
+            .popover(isPresented: $showsBookmarkEditor) {
+                if let url = tab.currentURL {
+                    BookmarkEditorView(store: store, url: url, defaultTitle: tab.displayTitle)
+                }
+            }
 
             Button { showsShield = true } label: {
                 Image(systemName: "shield.lefthalf.filled")
